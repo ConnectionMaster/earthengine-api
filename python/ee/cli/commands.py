@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# Lint as: python2, python3
 """Commands supported by the Earth Engine command line interface.
 
 Each command is implemented by extending the Command class. Each class
@@ -170,7 +169,7 @@ def _comma_separated_pyramiding_policies(string):
   redvalues = []
   for value in values:
     value = value.upper()
-    if value not in {'MEAN', 'SAMPLE', 'MIN', 'MAX', 'MODE'}:
+    if value not in {'MEAN', 'SAMPLE', 'MIN', 'MAX', 'MODE', 'MEDIAN'}:
       raise argparse.ArgumentTypeError(error_msg.format(string))
     redvalues.append(value)
   return redvalues
@@ -1282,6 +1281,8 @@ class UploadImageCommand(object):
           'id': 'ts',
           'sources': [{'uris': [source]} for source in source_files]
       }
+    if args.crs:
+      tileset['crs'] = args.crs
     manifest = {
         'name': args.asset_id,
         'properties': properties,

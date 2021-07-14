@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# Lint as: python3
 """Handle the routing for the application."""
 
 import collections
@@ -47,8 +46,8 @@ def setup_ee():
   """Sets up Earth Engine authentication."""
   with open("privatekey.json") as keyfile:
     extracted_key_data = keyfile.read()
-    credentials = ee.ServiceAccountCredentials(config.EE_SERVICE_ACCOUNT,
-                                               key_data=extracted_key_data)
+    credentials = ee.ServiceAccountCredentials(
+        config.EE_SERVICE_ACCOUNT, key_data=extracted_key_data)
   ee.Initialize(credentials)
 
 

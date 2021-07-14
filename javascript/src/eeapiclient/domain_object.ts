@@ -14,6 +14,23 @@ export interface ObjectMapMetadata {
   ctor: SerializableCtor<ISerializable>|null;
 }
 
+/** Primitive types used in ISerializable fields. */
+type Primitive = string|number|boolean|null|undefined;
+
+/**
+ * Mapped type that annotates all nested fields on an object as optional,
+ * while stripping unwanted ISerializable-related fields from the type.
+ *
+ * i.e., {a: {b: {c: boolean}}} gets transformed into {a?: {b?: {c?: boolean}}}
+ */
+export type DeepPartialISerializable<T> =
+    T extends Primitive ? Partial<T>: T extends object ?
+    Omit<
+        {[K in keyof T]?: DeepPartialISerializable<T[K]>},
+        'Serializable$get'|'Serializable$has'|'Serializable$set'|
+        'getClassMetadata'|'getConstructor'|'getPartialClassMetadata'>:
+    unknown;
+
 /**
  * Description of the properties in a Serializable class.
  */
@@ -25,6 +42,7 @@ export interface ClassMetadata {
   descriptions: ObjectMap<string>;
   // Use {} since enums are all different types.
   enums: ObjectMap<{}>;
+  emptyArrayIsUnset: boolean;
 }
 
 class NullClass {}
@@ -74,6 +92,7 @@ export function buildClassMetadataFromPartial(
     objectMaps: {},
     objects: {},
     enums: {},
+    emptyArrayIsUnset: false,
     ...partialClassMetadata,
   };
 }
@@ -209,6 +228,16 @@ function deserializeInstanciator(ctor: CopyConstructor) {
   return new ctor();
 }
 
+/**
+ * A strict version of the deserialize function that restricts the type of the
+ * serialized object to be an optional subset of the specified ISerializable
+ * class.
+ */
+export function strictDeserialize<T extends ISerializable>(
+    type: SerializableCtor<T>, raw: DeepPartialISerializable<T>) {
+  return deserialize(type, raw);
+}
+
 type CopyValueGetter = (key: string, obj: unknown) => {};
 type CopyValueSetter = (key: string, obj: {}, value: {}) => void;
 type CopyConstructor = SerializableCtor<ISerializable>|null|undefined;
@@ -245,6 +274,9 @@ function deepCopy<T>(
     let copy: {};
     if (arrays.hasOwnProperty(key)) {
       // Explicitly an array, treat as Serializables
+      if (metadata.emptyArrayIsUnset && (value as Array<{}>).length === 0) {
+        continue;
+      }
       copy = deepCopyValue(
           value, valueGetter, valueSetter, copyInstanciator, true, true,
           arrays[key]);
@@ -269,6 +301,9 @@ function deepCopy<T>(
 
     } else if (Array.isArray(value)) {  // This needs to be second to last!
       // Implicitly an array, treat as primitives
+      if (metadata.emptyArrayIsUnset && value.length === 0) {
+        continue;
+      }
       copy = deepCopyValue(
           value, valueGetter, valueSetter, copyInstanciator, true, false);
 
@@ -399,11 +434,15 @@ export function deepEquals(
     // So what really should be a TODO is to make this comparison aware of
     // the concept of default values at times, and know how to compare defaults
     // without the side effect of setting values. Which will be difficult.
-    if (serializable1.Serializable$has(key) !==
-        serializable2.Serializable$has(key)) {
+    //
+    // The story for arrays is a bit different. There we follow protobuf
+    // semantics, where an unset array and empty array are indistinguishable.
+    const has1 = hasAndIsNotEmptyArray(serializable1, key, metadata1);
+    const has2 = hasAndIsNotEmptyArray(serializable2, key, metadata2);
+    if (has1 !== has2) {
       return false;
     }
-    if (!serializable1.Serializable$has(key)) {
+    if (!has1) {
       continue;
     }
 
@@ -444,6 +483,16 @@ export function deepEquals(
       return false;
     }
   }
+  return true;
+}
+
+function hasAndIsNotEmptyArray(
+    serializable: ISerializable, key: string,
+    metadata: ClassMetadata): boolean {
+  if (!serializable.Serializable$has(key)) return false;
+  if (!metadata.emptyArrayIsUnset) return true;
+  const value = serializable.Serializable$get(key);
+  if (Array.isArray(value)) return value.length !== 0;
   return true;
 }
 
@@ -528,4 +577,18 @@ function sameKeys<T>(a: T, b: T) {
     }
   }
   return true;
+}
+
+/**
+ * Use with jasmine.addCustomEqualityTester to perform deep semantic
+ * comparisons of serializable objects. This considers an unset list and an
+ * empty list to be the same, and it might hide additional differences due to
+ * implementation details in the future.
+ */
+export function serializableEqualityTester(
+    left: unknown, right: unknown): boolean|undefined {
+  if (left instanceof Serializable && right instanceof Serializable) {
+    return deepEquals(left, right);
+  }
+  return undefined;  // Do not change behavior for other types.
 }
