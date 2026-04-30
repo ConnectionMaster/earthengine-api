@@ -11,11 +11,44 @@ export abstract class ApiClient {
   // tslint:disable-next-line:no-any
   $validateParameter(param: any, pattern: RegExp): void {
     const paramStr = String(param);
-    if (!pattern.test(paramStr)) {
+
+    const isParamValid = this.getEnableStrictParameterValidation()
+      ? paramStr.match(pattern)?.[0] === paramStr
+      : pattern.test(paramStr);
+
+    // Server side validation uses full string matches, client side must have
+    // matching full string validation behavior.
+    if (!isParamValid) {
       throw new Error(
         `parameter [${paramStr}] does not match pattern [${pattern.toString()}]`,
       );
     }
+  }
+
+  /**
+   * If true, enable strict parameter validation.
+   *
+   * This is a temporary property to allow for a gradual rollout of strict
+   * parameter validation.
+   *
+   * It is set via the ts_api_client build rule.
+   */
+  enableStrictParameterValidation = false;
+
+  /**
+   * If true, enable strict parameter validation.
+   *
+   * This is a temporary method to allow for a gradual rollout of strict
+   * parameter validation.
+   *
+   * You can override this method at runtime by setting it on the prototype:
+   *
+   * ```
+   * ApiClient.prototype.getEnableStrictParameterValidation = () => true;
+   * ```
+   */
+  getEnableStrictParameterValidation(): boolean {
+    return this.enableStrictParameterValidation;
   }
 }
 
