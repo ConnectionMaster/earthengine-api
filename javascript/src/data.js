@@ -2207,7 +2207,7 @@ ee.data.getAssetRootQuota = function(rootId, opt_callback) {
       // Allow the regex to accept an empty string after the last slash.
       pattern = new RegExp('^projects\/[^/]+\/assets\/.*$');
     }
-    return validateParams(param, pattern);
+    return validateParams.call(assetsCall.$apiClient, param, pattern);
   };
   const getAssetRequest = assetsCall.get(name, {prettyPrint: false});
   return call.handle(getAssetRequest.then(getResponse));
