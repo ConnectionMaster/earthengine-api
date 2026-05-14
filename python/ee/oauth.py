@@ -27,6 +27,7 @@ import webbrowser
 import google.auth
 from google.auth import _cloud_sdk
 import google.auth.transport.requests
+from google.oauth2 import credentials as credentials_lib
 
 from ee import data as ee_data
 from ee import ee_exception
@@ -126,10 +127,26 @@ def get_appdefault_project() -> str | None:
     return None
 
 
-def _valid_credentials_exist() -> bool:
+def _has_scopes(
+    creds: credentials_lib.Credentials, scopes: Sequence[str]
+) -> bool:
+  """Checks if credentials satisfy the requested scopes."""
+  if hasattr(creds, 'has_scopes'):
+    return creds.has_scopes(scopes)
+  cred_scopes = creds.scopes or creds.default_scopes or []
+  return set(scopes).issubset(set(cred_scopes))
+
+
+def _valid_credentials_exist(
+    scopes: Sequence[str] | None = None,
+) -> bool:
+  """Checks if valid credentials exist and satisfy the requested scopes."""
   try:
     creds = ee_data.get_persistent_credentials()
-    return is_valid_credentials(creds)
+    if not is_valid_credentials(creds):
+      return False
+    requested_scopes = scopes or SCOPES
+    return _has_scopes(creds, requested_scopes)
   except ee_exception.EEException:
     return False
 
@@ -388,9 +405,10 @@ def _load_gcloud_credentials(
 ) -> None:
   """Initializes credentials by running gcloud flows."""
   client_id_file = None
+  requested_scopes = scopes or SCOPES
   command = GCLOUD_COMMAND.split()
   command[0] = shutil.which(command[0]) or command[0]  # Windows fix
-  command += ['--scopes=%s' % (','.join(scopes or SCOPES))]
+  command += ['--scopes=%s' % (','.join(requested_scopes))]
   if run_gcloud_legacy:
     client_id_json = dict(
         client_id=CLIENT_ID,
@@ -425,6 +443,7 @@ def _load_gcloud_credentials(
   with open(adc_path) as adc_json:
     adc = json.load(adc_json)
     adc = {k: adc[k] for k in ['client_id', 'client_secret', 'refresh_token']}
+    adc['scopes'] = requested_scopes
     write_private_json(get_credentials_path(), adc)
   print('\nSuccessfully saved authorization token.')
 
@@ -525,7 +544,7 @@ def authenticate(
     _obtain_and_write_token(cli_authorization_code, cli_code_verifier, scopes)
     return
 
-  if not force and _valid_credentials_exist():
+  if not force and _valid_credentials_exist(scopes):
     return True
 
   if not auth_mode:

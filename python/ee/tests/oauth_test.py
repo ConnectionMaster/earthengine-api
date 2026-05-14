@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Test for the oauth module."""
 
+import datetime
 import http.client
 import io
 import json
@@ -8,6 +9,8 @@ import sys
 import tempfile
 from unittest import mock
 import urllib.parse
+
+from google.oauth2 import credentials as credentials_lib
 
 import unittest
 from ee import ee_exception
@@ -95,6 +98,55 @@ class OAuthTest(unittest.TestCase):
         'quota_project_id': 'PROJECT',
     }
     self.assertEqual(expected_args, args)
+
+  @mock.patch.object(oauth, '_obtain_and_write_token', autospec=True)
+  @mock.patch.object(oauth.ee_data, 'get_persistent_credentials')
+  def testAuthenticate_differentScopes_reauthenticates(
+      self,
+      mock_get_persistent_credentials,
+      mock_obtain_and_write_token,
+  ):
+
+    def dummy_refresh_handler(request, scopes):
+      return (
+          'new_dummy_token',
+          datetime.datetime.utcnow() + datetime.timedelta(hours=1),
+      )
+
+    # Mock valid credentials to exist initially.
+    dummy_creds = credentials_lib.Credentials(
+        token='dummy_token',
+        scopes=oauth.SCOPES,
+        refresh_handler=dummy_refresh_handler
+    )
+    mock_get_persistent_credentials.return_value = dummy_creds
+
+    # First call with default scopes.
+    oauth.authenticate(auth_mode='notebook', scopes=oauth.SCOPES)
+    mock_obtain_and_write_token.assert_not_called()
+
+    # Second call with different scopes.
+    new_scopes = ['https://www.googleapis.com/auth/earthengine.readonly']
+    oauth.authenticate(auth_mode='notebook', scopes=new_scopes)
+    mock_obtain_and_write_token.assert_called_once()
+
+    # Third call with the new scopes again.
+    mock_obtain_and_write_token.reset_mock()
+    # Return a new credentials object with the new scopes.
+    dummy_creds_new = credentials_lib.Credentials(
+        token='dummy_token',
+        scopes=new_scopes,
+        refresh_handler=dummy_refresh_handler
+    )
+    mock_get_persistent_credentials.return_value = dummy_creds_new
+    oauth.authenticate(auth_mode='notebook', scopes=new_scopes)
+    mock_obtain_and_write_token.assert_not_called()
+
+    # Fourth call requesting a subset of full scopes does not reauthenticate.
+    mock_get_persistent_credentials.return_value = dummy_creds
+    subset_scopes = [oauth.SCOPES[0]]
+    oauth.authenticate(auth_mode='notebook', scopes=subset_scopes)
+    mock_obtain_and_write_token.assert_not_called()
 
   def test_is_valid_credentials(self):
     self.assertFalse(oauth.is_valid_credentials(None))
